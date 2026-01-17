@@ -1,41 +1,14 @@
 use anyhow::{Context, Result, bail};
-use clap::Parser;
 use colored::Colorize;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use yt_dlp::Youtube;
 
-#[derive(Parser, Debug)]
-#[command(name = "url-mp3")]
-#[command(version, about = "Convert YouTube URLs to MP3 files")]
-struct Args {
-    /// YouTube URLs to download
-    #[arg(required = true)]
-    urls: Vec<String>,
-
-    /// Output directory for MP3 files
-    #[arg(short, long)]
-    output: Option<PathBuf>,
-
-    /// Audio quality: best, high, medium, low
-    #[arg(short, long, default_value = "best")]
-    quality: String,
-
-    /// Custom filename (without extension)
-    #[arg(short, long)]
-    filename: Option<String>,
-
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
-}
-
 fn get_default_output_dir() -> PathBuf {
-    dirs::audio_dir().unwrap_or_else(|| {
-        dirs::home_dir()
-            .map(|h| h.join("Music"))
-            .unwrap_or_else(|| PathBuf::from("."))
-    })
+    dirs::home_dir()
+        .map(|h| h.join("Desktop").join("soundboard"))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn get_libs_dir() -> PathBuf {
@@ -72,31 +45,14 @@ async fn ensure_binaries() -> Result<PathBuf> {
     Ok(libs_dir)
 }
 
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| if "/:*?\"<>|\\".contains(c) { '_' } else { c })
-        .collect()
-}
-
 fn is_youtube_url(url: &str) -> bool {
     url.contains("youtube.com") || url.contains("youtu.be")
-}
-
-fn quality_to_bitrate(quality: &str) -> &str {
-    match quality.to_lowercase().as_str() {
-        "best" => "320",
-        "high" => "256",
-        "medium" => "192",
-        "low" => "128",
-        _ => "320",
-    }
 }
 
 fn download_mp3(
     libs_dir: &PathBuf,
     output_dir: &PathBuf,
     url: &str,
-    args: &Args,
 ) -> Result<PathBuf> {
     if !is_youtube_url(url) {
         bail!("Not a valid YouTube URL: {}", url);
@@ -105,27 +61,16 @@ fn download_mp3(
     let yt_dlp_path = libs_dir.join("yt-dlp");
     let ffmpeg_path = libs_dir.join("ffmpeg");
 
-    // Build output template
-    let output_template = if let Some(filename) = &args.filename {
-        output_dir.join(format!("{}.%(ext)s", sanitize_filename(filename)))
-    } else {
-        output_dir.join("%(title)s.%(ext)s")
-    };
+    let output_template = output_dir.join("%(title)s.%(ext)s");
 
-    let bitrate = quality_to_bitrate(&args.quality);
-    let audio_quality = format!("{}K", bitrate);
-
-    if args.verbose {
-        println!("  Downloading and converting to MP3...");
-        println!("  Quality: {} kbps", bitrate);
-    }
+    println!("Downloading...");
 
     // Run yt-dlp with audio extraction
     let output = Command::new(&yt_dlp_path)
         .args([
             "-x",                          // Extract audio
             "--audio-format", "mp3",       // Convert to MP3
-            "--audio-quality", &audio_quality,
+            "--audio-quality", "320K",     // Best quality
             "--ffmpeg-location", ffmpeg_path.to_str().unwrap(),
             "-o", output_template.to_str().unwrap(),
             "--no-playlist",               // Don't download playlists
@@ -161,20 +106,12 @@ fn download_mp3(
         output_dir.join(format!("{}.mp3", stem))
     };
 
-    if args.verbose {
-        println!("  Output: {}", mp3_path.display());
-    }
-
     Ok(mp3_path)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let output_dir = args.output.clone().unwrap_or_else(get_default_output_dir);
-
-    println!("Output directory: {}", output_dir.display());
+    let output_dir = get_default_output_dir();
 
     // Ensure output directory exists
     std::fs::create_dir_all(&output_dir)
@@ -183,31 +120,26 @@ async fn main() -> Result<()> {
     // Ensure binaries are available
     let libs_dir = ensure_binaries().await?;
 
-    let total = args.urls.len();
-    let mut success_count = 0;
+    // Prompt for URL
+    print!("Enter YouTube URL: ");
+    io::stdout().flush()?;
 
-    for (i, url) in args.urls.iter().enumerate() {
-        println!("\n[{}/{}] Processing: {}", i + 1, total, url);
+    let mut url = String::new();
+    io::stdin().read_line(&mut url)?;
+    let url = url.trim();
 
-        match download_mp3(&libs_dir, &output_dir, url, &args) {
-            Ok(path) => {
-                println!("{}: {}", "Saved".green(), path.display());
-                success_count += 1;
-            }
-            Err(e) => {
-                eprintln!("{}: {}", "Error".red(), e);
-                continue;
-            }
-        }
+    if url.is_empty() {
+        bail!("No URL provided");
     }
 
-    println!(
-        "\n{} Downloaded {}/{} file(s) to {}",
-        "Done!".green(),
-        success_count,
-        total,
-        output_dir.display()
-    );
+    match download_mp3(&libs_dir, &output_dir, url) {
+        Ok(path) => {
+            println!("{}: {}", "Saved".green(), path.display());
+        }
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+        }
+    }
 
     Ok(())
 }
