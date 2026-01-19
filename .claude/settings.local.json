@@ -4,7 +4,9 @@
       "WebSearch",
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:github.com)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(pnpm install)"
     ]
   }
 }

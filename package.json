@@ -1,0 +1,11 @@
+{
+  "name": "url-mp3-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:server": "cargo run -p url-mp3-server",
+    "build:web": "pnpm --filter web build",
+    "build:rust": "cargo build --release"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

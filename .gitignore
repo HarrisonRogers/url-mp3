@@ -1,1 +1,15 @@
+# Rust
 /target
+
+# Node
+node_modules
+.vinxi
+.output
+dist
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
