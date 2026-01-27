@@ -6,6 +6,5 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread"] }
 yt-dlp = "1.4"
-anyhow = "1.0"
-colored = "2.1"
 dirs = "5.0"
+dialoguer = "0.12.0"
