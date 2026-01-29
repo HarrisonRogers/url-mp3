@@ -4,11 +4,18 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use yt_dlp::Youtube;
+use dialoguer::Select;
 
-fn get_default_output_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join("Desktop").join("soundboard"))
-        .unwrap_or_else(|| PathBuf::from("."))
+fn get_default_output_dir(download_type: &str) -> PathBuf {
+    if download_type == "audio" {
+        return dirs::home_dir()
+            .map(|h| h.join("Desktop").join("soundboard").join("sound-effects"))
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        return dirs::home_dir()
+            .map(|h| h.join("Desktop").join("soundboard"))
+            .unwrap_or_else(|| PathBuf::from("."))
+    }    
 }
 
 fn get_libs_dir() -> PathBuf {
@@ -109,9 +116,86 @@ fn download_mp3(
     Ok(mp3_path)
 }
 
+fn download_mp4(
+    libs_dir: &PathBuf,
+    output_dir: &PathBuf,
+    url: &str,
+) -> Result<PathBuf> {
+    if !is_youtube_url(url) {
+        bail!("Not a valid YouTube URL: {}", url);
+    }
+
+    let yt_dlp_path = libs_dir.join("yt-dlp");
+    let ffmpeg_path = libs_dir.join("ffmpeg");
+
+    let output_template = output_dir.join("%(title)s.%(ext)s");
+
+    println!("Downloading...");
+
+    // Run yt-dlp for video download
+    let output = Command::new(&yt_dlp_path)
+        .args([
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "--ffmpeg-location", ffmpeg_path.to_str().unwrap(),
+            "-o", output_template.to_str().unwrap(),
+            "--no-playlist",
+            "--no-progress",
+            url,
+        ])
+        .output()
+        .context("Failed to execute yt-dlp")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("yt-dlp failed: {}", stderr);
+    }
+
+    // Parse the output to find the actual filename
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Look for the destination line in yt-dlp output
+    let mp4_path = if let Some(line) = stdout.lines().find(|l| l.contains("Destination:") && l.contains(".mp4")) {
+        let path_str = line.split("Destination:").nth(1).unwrap_or("").trim();
+        PathBuf::from(path_str)
+    } else if let Some(line) = stdout.lines().find(|l| l.contains("[Merger]") && l.contains(".mp4")) {
+        // Sometimes yt-dlp shows the merged output path differently
+        let path_str = line.split("Merging formats into").nth(1)
+            .or_else(|| line.split("\"").nth(1))
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"');
+        PathBuf::from(path_str)
+    } else {
+        // Fallback: construct path from title
+        let title = stdout.lines()
+            .find(|l| l.contains("[download]") && l.contains("Destination:"))
+            .and_then(|l| l.split("Destination:").nth(1))
+            .map(|s| s.trim())
+            .unwrap_or("output");
+
+        let base = PathBuf::from(title);
+        let stem = base.file_stem().unwrap_or_default().to_str().unwrap_or("output");
+        output_dir.join(format!("{}.mp4", stem))
+    };
+
+    Ok(mp4_path)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let output_dir = get_default_output_dir();
+    // Terminal prompt for download type
+    let items = vec!["audio", "video"];
+    let selection = Select::new()
+        .with_prompt("What do you want to download?")
+        .default(0)
+        .items(&items)
+        .interact()
+        .expect("No input provided");
+    let download_type = items[selection];
+
+    let output_dir = get_default_output_dir(download_type);
+
 
     // Ensure output directory exists
     std::fs::create_dir_all(&output_dir)
@@ -132,7 +216,13 @@ async fn main() -> Result<()> {
         bail!("No URL provided");
     }
 
-    match download_mp3(&libs_dir, &output_dir, url) {
+    let result = if download_type == "audio" {
+        download_mp3(&libs_dir, &output_dir, url)
+    } else {
+        download_mp4(&libs_dir, &output_dir, url)
+    };
+
+    match result {
         Ok(path) => {
             println!("{}: {}", "Saved".green(), path.display());
         }
