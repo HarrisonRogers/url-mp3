@@ -1,8 +1,8 @@
 use yt_dlp::Youtube;
 use std::path::PathBuf;
-use yt_dlp::client::deps::Libraries;
 use std::io;
 use dialoguer::Select;
+use yt_dlp::client::deps::Libraries;
 
 fn get_default_output_dir(download_type: &str) -> PathBuf {
     if download_type == "audio" {
@@ -14,13 +14,6 @@ fn get_default_output_dir(download_type: &str) -> PathBuf {
             .map(|h| h.join("Desktop").join("soundboard"))
             .unwrap_or_else(|| PathBuf::from("."))
     }    
-}
-
-fn get_libs_dir() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("url-mp3")
-        .join("libs")
 }
 
 fn is_youtube_url(url: &str) -> bool {
@@ -51,31 +44,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize libraries and directories
-    let libraries_dir = PathBuf::from(get_libs_dir());
+    let libraries_dir = PathBuf::from("libs");
     let output_dir = PathBuf::from(get_default_output_dir(&download_type));
-    
+
     let youtube = libraries_dir.join("yt-dlp");
     let ffmpeg = libraries_dir.join("ffmpeg");
     
     let libraries = Libraries::new(youtube, ffmpeg);
-    let mut fetcher = Youtube::new(libraries, output_dir).await?;
-    fetcher.cache = None;
-    fetcher.download_cache = None;
-    fetcher.playlist_cache = None;
-
+    let fetcher = Youtube::new(libraries, output_dir).await?;
 
     let video = fetcher.fetch_video_infos(url.clone()).await?;
+    fetcher.update_downloader().await?;
 
     // Download audio or video logic
     if download_type == "audio" {
         println!("Downloading audio...");
-        let file_name = format!("{}.mp3", video.title);
-        let audio_path = fetcher.download_audio_stream(&video, file_name).await?;
-        println!("Downloaded audio to {}", audio_path.display());
+        let video_format = video.best_video_format().unwrap();
+        let format_path = fetcher.download_format(&video_format, format!("{}.mp3", video.title)).await?;
+        println!("Downloaded audio to {}", format_path.display());
     } else {
         println!("Downloading video...");
-        let file_name = format!("{}.mp4", video.title);
-        let video_path = fetcher.download_video_from_url(url, file_name).await?;
+        let video_format = video.best_video_format().unwrap();
+        let video_path = fetcher.download_format(&video_format, format!("{}.mp4", video.title)).await?;
         println!("Downloaded video to {}", video_path.display());
     }
     Ok(())
